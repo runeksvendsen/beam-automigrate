@@ -5,10 +5,14 @@ module Database.Beam.AutoMigrate.Util where
 
 import Control.Applicative.Lift
 import Control.Monad.Except
+import Data.Char
 import Data.Functor.Constant
+import Data.Set (Set)
+import qualified Data.Set as Set
 import Data.String (fromString)
 import Data.Text (Text)
-import Database.Beam.AutoMigrate.Types (ColumnName (..), TableName (..))
+import qualified Data.Text as T
+import Database.Beam.AutoMigrate.Types (ColumnName(..), TableName(..))
 import Database.Beam.Schema (Beamable, PrimaryKey, TableEntity, TableSettings)
 import qualified Database.Beam.Schema as Beam
 import Database.Beam.Schema.Tables
@@ -103,8 +107,110 @@ sqlOptCharSet :: Maybe Text -> Text
 sqlOptCharSet Nothing = mempty
 sqlOptCharSet (Just cs) = " CHARACTER SET " <> cs
 
+-- | Escape a sql identifier according to the rules defined in the postgres manual
 sqlEscaped :: Text -> Text
-sqlEscaped t = "\"" <> t <> "\""
+sqlEscaped t = if sqlValidUnescaped t
+  then t
+  else
+    -- Double-quotes inside identifier names must be escaped by with an additional double-quote
+    "\"" <> (T.intercalate "\"\"" $ T.splitOn "\"" t) <> "\""
+
+-- | Check whether an identifier is valid without escaping (True) or must be escaped (False)
+-- according to the postgres <https://www.postgresql.org/docs/current/sql-syntax-lexical.html#SQL-SYNTAX-IDENTIFIERS manual>
+sqlValidUnescaped :: Text -> Bool
+sqlValidUnescaped t = case T.uncons t of
+  Nothing -> True
+  Just (c, rest) -> validUnescapedHead c && validUnescapedTail rest && not (sqlIsReservedKeyword t)
+  where
+    validUnescapedHead c = c `elem` ("1234567890_"::String) || isAlpha c
+    validUnescapedTail = all
+      (\r -> (isAlpha r && isLower r) || r `elem` ("1234567890$_"::String)) . T.unpack
+
+sqlIsReservedKeyword :: Text -> Bool
+sqlIsReservedKeyword t = T.toCaseFold t `Set.member` postgresKeywordsReserved
+
+-- | Reserved keywords according to
+-- https://www.postgresql.org/docs/current/sql-keywords-appendix.html
+postgresKeywordsReserved :: Set Text
+postgresKeywordsReserved = Set.fromList $ map T.toCaseFold
+  [ "ALL"
+  , "ANALYSE"
+  , "ANALYZE"
+  , "AND"
+  , "ANY"
+  , "ARRAY"
+  , "AS"
+  , "ASC"
+  , "ASYMMETRIC"
+  , "BOTH"
+  , "CASE"
+  , "CAST"
+  , "CHECK"
+  , "COLLATE"
+  , "COLUMN"
+  , "CONSTRAINT"
+  , "CREATE"
+  , "CURRENT_CATALOG"
+  , "CURRENT_DATE"
+  , "CURRENT_ROLE"
+  , "CURRENT_TIME"
+  , "CURRENT_TIMESTAMP"
+  , "CURRENT_USER"
+  , "DEFAULT"
+  , "DEFERRABLE"
+  , "DESC"
+  , "DISTINCT"
+  , "DO"
+  , "ELSE"
+  , "END"
+  , "EXCEPT"
+  , "FALSE"
+  , "FETCH"
+  , "FOR"
+  , "FOREIGN"
+  , "FROM"
+  , "GRANT"
+  , "GROUP"
+  , "HAVING"
+  , "IN"
+  , "INITIALLY"
+  , "INTERSECT"
+  , "INTO"
+  , "LATERAL"
+  , "LEADING"
+  , "LIMIT"
+  , "LOCALTIME"
+  , "LOCALTIMESTAMP"
+  , "NOT"
+  , "NULL"
+  , "OFFSET"
+  , "ON"
+  , "ONLY"
+  , "OR"
+  , "ORDER"
+  , "PLACING"
+  , "PRIMARY"
+  , "REFERENCES"
+  , "RETURNING"
+  , "SELECT"
+  , "SESSION_USER"
+  , "SOME"
+  , "SYMMETRIC"
+  , "TABLE"
+  , "THEN"
+  , "TO"
+  , "TRAILING"
+  , "TRUE"
+  , "UNION"
+  , "UNIQUE"
+  , "USER"
+  , "USING"
+  , "VARIADIC"
+  , "WHEN"
+  , "WHERE"
+  , "WINDOW"
+  , "WITH"
+  ]
 
 sqlSingleQuoted :: Text -> Text
 sqlSingleQuoted t = "'" <> t <> "'"
